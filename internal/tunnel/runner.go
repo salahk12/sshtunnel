@@ -32,6 +32,9 @@ type Runner struct {
 	workers   []*worker
 	lastError atomic.Value // string
 	startedAt time.Time
+
+	bufBytes int
+	sock     sockOpts
 }
 
 type worker struct {
@@ -56,7 +59,17 @@ func NewRunner(cfg *config.Config, id string) (*Runner, error) {
 	if t.Workers < 1 {
 		t.Workers = 1
 	}
-	return &Runner{cfg: cfg, t: t, startedAt: time.Now()}, nil
+	buf := t.BufferSize * 1024
+	if buf <= 0 {
+		buf = 32 * 1024
+	}
+	sock := sockOpts{
+		sndBuf:  t.SocketBuffer * 1024,
+		rcvBuf:  t.SocketBuffer * 1024,
+		mss:     t.MSS,
+		noDelay: !t.DisableNoDelay,
+	}
+	return &Runner{cfg: cfg, t: t, startedAt: time.Now(), bufBytes: buf, sock: sock}, nil
 }
 
 // Run blocks until ctx is cancelled, maintaining workers and listeners.
@@ -179,7 +192,7 @@ func (r *Runner) dial() (*ssh.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sshx.Dial(r.t.RemoteHost, r.t.RemotePort, cfg)
+	return sshx.DialWithControl(r.t.RemoteHost, r.t.RemotePort, cfg, r.sock.control)
 }
 
 // pickWorker returns a connected client using round-robin over healthy workers.
@@ -198,7 +211,7 @@ func (r *Runner) pickWorker(start int) *ssh.Client {
 
 func (r *Runner) startListener(ctx context.Context, f store.Forward) (net.Listener, error) {
 	addr := fmt.Sprintf("%s:%d", f.ListenAddr, f.ListenPort)
-	lc := net.ListenConfig{}
+	lc := net.ListenConfig{Control: r.sock.control}
 	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("listen %s: %w", addr, err)
@@ -223,6 +236,7 @@ func (r *Runner) startListener(ctx context.Context, f store.Forward) (net.Listen
 
 func (r *Runner) handle(local net.Conn, f store.Forward, rr int) {
 	defer local.Close()
+	r.sock.applyToConn(local)
 	client := r.pickWorker(rr)
 	if client == nil {
 		r.lastError.Store("no healthy worker available for incoming connection")
@@ -243,7 +257,7 @@ func (r *Runner) handle(local net.Conn, f store.Forward, rr int) {
 	// local -> remote (upload to kharej)
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(remote, local)
+		n, _ := io.CopyBuffer(remote, local, make([]byte, r.bufBytes))
 		r.bytesOut.Add(uint64(n))
 		if cw, ok := remote.(interface{ CloseWrite() error }); ok {
 			cw.CloseWrite()
@@ -252,7 +266,7 @@ func (r *Runner) handle(local net.Conn, f store.Forward, rr int) {
 	// remote -> local (download into Iran)
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(local, remote)
+		n, _ := io.CopyBuffer(local, remote, make([]byte, r.bufBytes))
 		r.bytesIn.Add(uint64(n))
 		if cw, ok := local.(interface{ CloseWrite() error }); ok {
 			cw.CloseWrite()

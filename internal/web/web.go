@@ -315,6 +315,10 @@ type tunnelInput struct {
 	Compression         bool            `json:"compression"`
 	ServerAliveInterval int             `json:"server_alive_interval"`
 	ServerAliveCountMax int             `json:"server_alive_count_max"`
+	BufferSize          int             `json:"buffer_size"`
+	SocketBuffer        int             `json:"socket_buffer"`
+	DisableNoDelay      bool            `json:"disable_nodelay"`
+	MSS                 int             `json:"mss"`
 	Forwards            []store.Forward `json:"forwards"`
 	Enabled             bool            `json:"enabled"`
 }
@@ -334,6 +338,25 @@ func (in *tunnelInput) normalize() {
 	}
 	if in.ServerAliveCountMax == 0 {
 		in.ServerAliveCountMax = 3
+	}
+	// Tuning bounds: keep values sane.
+	if in.BufferSize < 0 {
+		in.BufferSize = 0
+	}
+	if in.BufferSize > 8192 { // max 8 MB copy buffer
+		in.BufferSize = 8192
+	}
+	if in.SocketBuffer < 0 {
+		in.SocketBuffer = 0
+	}
+	if in.SocketBuffer > 65536 { // max 64 MB socket buffer
+		in.SocketBuffer = 65536
+	}
+	if in.MSS < 0 {
+		in.MSS = 0
+	}
+	if in.MSS > 9000 {
+		in.MSS = 9000
 	}
 	for i := range in.Forwards {
 		if in.Forwards[i].ListenAddr == "" {
@@ -426,6 +449,10 @@ func applyInput(t *store.Tunnel, in *tunnelInput) {
 	t.Compression = in.Compression
 	t.ServerAliveInterval = in.ServerAliveInterval
 	t.ServerAliveCountMax = in.ServerAliveCountMax
+	t.BufferSize = in.BufferSize
+	t.SocketBuffer = in.SocketBuffer
+	t.DisableNoDelay = in.DisableNoDelay
+	t.MSS = in.MSS
 	t.Forwards = in.Forwards
 	t.Enabled = in.Enabled
 }

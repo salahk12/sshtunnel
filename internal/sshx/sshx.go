@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -115,6 +116,31 @@ func BuildClientConfig(o ClientConfigOptions) (*ssh.ClientConfig, error) {
 func Dial(host string, port int, cfg *ssh.ClientConfig) (*ssh.Client, error) {
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	return ssh.Dial("tcp", addr, cfg)
+}
+
+// SocketControl matches net.Dialer.Control: a hook to tune the raw fd before
+// connect (set SO_SNDBUF/SO_RCVBUF, TCP_MAXSEG, TCP_NODELAY, …).
+type SocketControl func(network, address string, c syscall.RawConn) error
+
+// DialWithControl dials the SSH transport TCP socket through a custom dialer so
+// socket options can be applied to the long-haul (Iran<->kharej) connection,
+// then performs the SSH handshake over it.
+func DialWithControl(host string, port int, cfg *ssh.ClientConfig, control SocketControl) (*ssh.Client, error) {
+	if control == nil {
+		return Dial(host, port, cfg)
+	}
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	d := net.Dialer{Timeout: cfg.Timeout, Control: control}
+	conn, err := d.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return ssh.NewClient(c, chans, reqs), nil
 }
 
 // InstallKey appends the public key to the remote ~/.ssh/authorized_keys,

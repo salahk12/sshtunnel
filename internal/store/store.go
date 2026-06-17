@@ -47,6 +47,12 @@ type Tunnel struct {
 	ServerAliveInterval int    `json:"server_alive_interval"`
 	ServerAliveCountMax int    `json:"server_alive_count_max"`
 
+	// Advanced TCP/SSH tuning (per tunnel).
+	BufferSize     int  `json:"buffer_size"`     // copy buffer KB; 0 => 32
+	SocketBuffer   int  `json:"socket_buffer"`   // SO_SNDBUF/SO_RCVBUF KB; 0 => OS default
+	DisableNoDelay bool `json:"disable_nodelay"` // false => TCP_NODELAY on (low latency)
+	MSS            int  `json:"mss"`             // TCP_MAXSEG bytes; 0 => default
+
 	Forwards  []Forward `json:"forwards"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
