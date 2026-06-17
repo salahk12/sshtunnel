@@ -19,7 +19,7 @@
 > پیش از انتشار، در `scripts/install.sh` مقدار `REPO` را به ریپوی گیت‌هاب خودتان تغییر دهید.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/USER/ssh-tunnel-panel/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/salahk12/sshtunnel/main/scripts/install.sh)
 ```
 
 نصب‌کننده باینری مناسب معماری سرور (amd64/arm64) را از GitHub Release می‌گیرد، سرویس

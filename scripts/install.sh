@@ -9,7 +9,7 @@
 #
 set -euo pipefail
 
-REPO="${REPO:-USER/ssh-tunnel-panel}"     # <-- change to your GitHub repo
+REPO="${REPO:-salahk12/sshtunnel}"     # <-- change to your GitHub repo
 VERSION="${VERSION:-latest}"
 PORT="${PORT:-2095}"
 MASTER="${MASTER:-0}"                       # MASTER=1 => enable the central dashboard
