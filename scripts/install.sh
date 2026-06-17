@@ -9,6 +9,9 @@
 #
 set -euo pipefail
 
+# Detect explicit overrides BEFORE applying defaults (so upgrades preserve settings).
+PORT_SET=0; [ -n "${PORT:-}" ] && PORT_SET=1
+
 REPO="${REPO:-salahk12/sshtunnel}"     # <-- change to your GitHub repo
 VERSION="${VERSION:-latest}"
 PORT="${PORT:-2095}"
@@ -84,7 +87,12 @@ MASTER_FLAG=""
 if [ "$FIRST_INSTALL" -eq 1 ]; then
   "$BIN" admin --listen "0.0.0.0:$PORT" --random-path $MASTER_FLAG
 else
-  "$BIN" admin --listen "0.0.0.0:$PORT" $MASTER_FLAG --show || true
+  # Upgrade: preserve existing port/path/credentials. Only change the port if
+  # PORT was explicitly provided on this run.
+  LISTEN_FLAG=""
+  [ "$PORT_SET" -eq 1 ] && LISTEN_FLAG="--listen 0.0.0.0:$PORT"
+  ylw "نصب قبلی شناسایی شد — تنظیمات و اطلاعات ورود حفظ می‌شوند (آپدیت)."
+  "$BIN" admin $LISTEN_FLAG $MASTER_FLAG --show || true
 fi
 
 # --- systemd service for the panel itself ---
@@ -108,11 +116,15 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now sshtunnel-panel
+systemctl enable sshtunnel-panel >/dev/null 2>&1 || true
+# restart (not just start) so an upgrade actually loads the new binary
+systemctl restart sshtunnel-panel
 
 sleep 1
 IP="$(curl -fsSL --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 WEBPATH="$(grep -o '"base_path": *"[^"]*"' "$CONFIG_DIR/config.json" | sed 's/.*: *"//;s/"//')"
+LISTEN="$(grep -o '"listen": *"[^"]*"' "$CONFIG_DIR/config.json" | sed 's/.*: *"//;s/"//')"
+PORT="${LISTEN##*:}"   # actual port from config (may differ from default on upgrade)
 
 echo
 grn "============================================================"
