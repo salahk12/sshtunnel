@@ -25,16 +25,17 @@ var staticFS embed.FS
 
 // Server holds web dependencies.
 type Server struct {
-	cfg   *config.Config
-	st    *store.Store
-	mgr   *tunnel.Manager
-	sess  *sessionStore
-	index []byte
+	cfg    *config.Config
+	st     *store.Store
+	mgr    *tunnel.Manager
+	revMgr *tunnel.ReverseManager
+	sess   *sessionStore
+	index  []byte
 }
 
 // New builds the HTTP server handler.
 func New(cfg *config.Config, st *store.Store, mgr *tunnel.Manager) (http.Handler, error) {
-	s := &Server{cfg: cfg, st: st, mgr: mgr, sess: newSessionStore()}
+	s := &Server{cfg: cfg, st: st, mgr: mgr, revMgr: tunnel.NewReverseManager(cfg), sess: newSessionStore()}
 
 	raw, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
@@ -275,9 +276,10 @@ type tunnelView struct {
 func (s *Server) view(t *store.Tunnel, withStatus bool) tunnelView {
 	cp := *t
 	cp.PrivateKey = "" // never expose
+	cp.ReverseKey = "" // never expose
 	v := tunnelView{Tunnel: &cp}
 	if withStatus {
-		st := s.mgr.Status(t.ID)
+		st := s.statusTunnel(t)
 		v.Status = &st
 	}
 	return v
@@ -304,12 +306,16 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 // tunnelInput is the create/update payload.
 type tunnelInput struct {
 	Name                string          `json:"name"`
+	Mode                string          `json:"mode"`
 	RemoteHost          string          `json:"remote_host"`
 	RemotePort          int             `json:"remote_port"`
 	Username            string          `json:"username"`
 	AuthMethod          string          `json:"auth_method"`
 	Password            string          `json:"password"`
 	PrivateKey          string          `json:"private_key"`
+	IranHost            string          `json:"iran_host"`
+	IranSSHPort         int             `json:"iran_ssh_port"`
+	IranUser            string          `json:"iran_user"`
 	Cipher              string          `json:"cipher"`
 	Workers             int             `json:"workers"`
 	Compression         bool            `json:"compression"`
@@ -324,6 +330,15 @@ type tunnelInput struct {
 }
 
 func (in *tunnelInput) normalize() {
+	if in.Mode == "" {
+		in.Mode = store.ModeLocal
+	}
+	if in.IranSSHPort == 0 {
+		in.IranSSHPort = 22
+	}
+	if in.IranUser == "" {
+		in.IranUser = "root"
+	}
 	if in.RemotePort == 0 {
 		in.RemotePort = 22
 	}
@@ -371,6 +386,9 @@ func (in *tunnelInput) normalize() {
 func (in *tunnelInput) validate() error {
 	if in.Name == "" || in.RemoteHost == "" || in.Username == "" {
 		return fmt.Errorf("name, remote_host and username are required")
+	}
+	if in.Mode == store.ModeReverse && in.IranHost == "" {
+		return fmt.Errorf("iran_host (public IP of this server) is required for reverse mode")
 	}
 	if len(in.Forwards) == 0 {
 		return fmt.Errorf("at least one port forward is required")
@@ -436,11 +454,67 @@ func (s *Server) resolveAuth(in *tunnelInput, t *store.Tunnel, existing *store.T
 	default:
 		return fmt.Errorf("auth_method must be 'password' or 'key'")
 	}
+	// Reverse mode needs a separate key that the kharej connector uses to dial
+	// back into this Iran server.
+	if in.Mode == store.ModeReverse {
+		if existing != nil && existing.ReverseKey != "" {
+			t.ReverseKey = existing.ReverseKey
+		}
+		if t.ReverseKey == "" {
+			kp, err := sshx.GenerateKey("sshtunnel-reverse-" + t.ID)
+			if err != nil {
+				return err
+			}
+			t.ReverseKey = kp.PrivatePEM
+		}
+	}
 	return nil
+}
+
+// ---- mode dispatch (local Manager vs ReverseManager) ----
+
+func (s *Server) applyTunnel(t *store.Tunnel) error {
+	if t.Mode == store.ModeReverse {
+		return s.revMgr.Apply(t)
+	}
+	return s.mgr.Apply(t)
+}
+
+func (s *Server) removeTunnel(t *store.Tunnel) {
+	if t.Mode == store.ModeReverse {
+		_ = s.revMgr.Remove(t)
+		return
+	}
+	_ = s.mgr.Remove(t.ID)
+}
+
+func (s *Server) statusTunnel(t *store.Tunnel) tunnel.Status {
+	if t.Mode == store.ModeReverse {
+		return s.revMgr.Status(t)
+	}
+	return s.mgr.Status(t.ID)
+}
+
+func (s *Server) restartTunnel(t *store.Tunnel) error {
+	if t.Mode == store.ModeReverse {
+		return s.revMgr.Restart(t)
+	}
+	return s.mgr.Restart(t.ID)
+}
+
+func (s *Server) logsTunnel(t *store.Tunnel) (string, error) {
+	if t.Mode == store.ModeReverse {
+		return s.revMgr.Logs(t, 200)
+	}
+	return s.mgr.Logs(t.ID, 200)
 }
 
 func applyInput(t *store.Tunnel, in *tunnelInput) {
 	t.Name = in.Name
+	t.Mode = in.Mode
+	t.IranHost = in.IranHost
+	t.IranSSHPort = in.IranSSHPort
+	t.IranUser = in.IranUser
 	t.RemoteHost = in.RemoteHost
 	t.RemotePort = in.RemotePort
 	t.Username = in.Username
@@ -486,8 +560,8 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.mgr.Apply(t); err != nil {
-		writeErr(w, http.StatusInternalServerError, "saved but failed to apply systemd unit: "+err.Error())
+	if err := s.applyTunnel(t); err != nil {
+		writeErr(w, http.StatusInternalServerError, "saved but failed to apply: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, s.view(t, true))
@@ -520,7 +594,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.mgr.Apply(t); err != nil {
+	if err := s.applyTunnel(t); err != nil {
 		writeErr(w, http.StatusInternalServerError, "saved but failed to apply: "+err.Error())
 		return
 	}
@@ -529,11 +603,12 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, err := s.st.Tunnel(id); err != nil {
+	t, err := s.st.Tunnel(id)
+	if err != nil {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	_ = s.mgr.Remove(id)
+	s.removeTunnel(t)
 	if err := s.st.DeleteTunnel(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -557,13 +632,13 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	case "start":
 		t.Enabled = true
 		_ = s.st.UpdateTunnel(t)
-		err = s.mgr.Apply(t)
+		err = s.applyTunnel(t)
 	case "stop":
 		t.Enabled = false
 		_ = s.st.UpdateTunnel(t)
-		err = s.mgr.Apply(t)
+		err = s.applyTunnel(t)
 	case "restart":
-		err = s.mgr.Restart(id)
+		err = s.restartTunnel(t)
 	default:
 		writeErr(w, http.StatusBadRequest, "unknown action")
 		return
@@ -576,8 +651,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	out, _ := s.mgr.Logs(id, 200)
+	t, err := s.st.Tunnel(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	out, _ := s.logsTunnel(t)
 	writeJSON(w, http.StatusOK, map[string]string{"logs": out})
 }
 

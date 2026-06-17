@@ -30,16 +30,29 @@ type Forward struct {
 }
 
 // Tunnel is a managed SSH tunnel configuration.
+// Tunnel modes.
+const (
+	ModeLocal   = "local"   // Iran dials kharej; Iran binds the port (default)
+	ModeReverse = "reverse" // kharej dials Iran; Iran binds the port, no Iran egress
+)
+
 type Tunnel struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
-	RemoteHost string    `json:"remote_host"`
+	Mode       string    `json:"mode"`        // local | reverse
+	RemoteHost string    `json:"remote_host"` // kharej (foreign) server IP
 	RemotePort int       `json:"remote_port"` // ssh port on kharej, default 22
 	Username   string    `json:"username"`
 	AuthMethod string    `json:"auth_method"`
-	PrivateKey string    `json:"private_key"` // PEM; the key the tunnel authenticates with
+	PrivateKey string    `json:"private_key"` // PEM; key to reach kharej
 	PublicKey  string    `json:"public_key"`  // authorized_keys line
 	HostKey    string    `json:"host_key"`    // pinned remote host key (authorized_keys format)
+
+	// Reverse-mode only: how the kharej connector dials back into this Iran server.
+	IranHost    string `json:"iran_host"`     // public IP/host of this Iran server
+	IranSSHPort int    `json:"iran_ssh_port"` // ssh port on Iran, default 22
+	IranUser    string `json:"iran_user"`     // login user on Iran, default root
+	ReverseKey  string `json:"reverse_key"`   // private key deployed to kharej (kharej->Iran)
 
 	Cipher              string `json:"cipher"`
 	Workers             int    `json:"workers"`

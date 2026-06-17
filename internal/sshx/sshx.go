@@ -194,6 +194,40 @@ func TestConnection(o ClientConfigOptions, host string, port int) (hostKey strin
 	return captured, nil
 }
 
+// RunCommand runs a command on the remote host and returns combined output.
+func RunCommand(c *ssh.Client, cmd string) (string, error) {
+	s, err := c.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer s.Close()
+	out, err := s.CombinedOutput(cmd)
+	return string(out), err
+}
+
+// WriteRemoteFile writes content to a remote path (creating parent dirs) and
+// applies the given chmod mode (e.g. "600").
+func WriteRemoteFile(c *ssh.Client, path, content, mode string) error {
+	s, err := c.NewSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	s.Stdin = strings.NewReader(content)
+	dir := path[:strings.LastIndex(path, "/")]
+	cmd := fmt.Sprintf("mkdir -p %s && cat > %s && chmod %s %s",
+		shellQuote(dir), shellQuote(path), mode, shellQuote(path))
+	if out, err := combinedRun(s, cmd); err != nil {
+		return fmt.Errorf("%v: %s", err, out)
+	}
+	return nil
+}
+
+func combinedRun(s *ssh.Session, cmd string) (string, error) {
+	out, err := s.Output(cmd)
+	return string(out), err
+}
+
 // PublicFromPrivate derives the authorized_keys line from a private key PEM.
 func PublicFromPrivate(privatePEM string) (string, error) {
 	signer, err := ssh.ParsePrivateKey([]byte(privatePEM))

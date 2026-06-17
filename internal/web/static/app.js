@@ -340,10 +340,26 @@ function openTunnelForm(apiBase, t, onSaved) {
   };
   renderFwds();
 
+  // Mode selector (local vs reverse) + reverse-only fields.
+  const modeSel = el("select", {},
+    el("option", { value: "local", selected: (!t.mode || t.mode === "local") ? "1" : null }, "Local — ایران به خارج وصل می‌شود (پیش‌فرض)"),
+    el("option", { value: "reverse", selected: t.mode === "reverse" ? "1" : null }, "Reverse — خارج به ایران وصل می‌شود (ایران خروجی نمی‌زند)"));
+  f.mode = modeSel;
+  const revBox = el("div", { class: t.mode === "reverse" ? "" : "hidden" },
+    el("hr"),
+    el("p", { class: "muted", style: "margin-top:0" }, "ریورس: «سرور خارج» جایی است که کانکتور نصب می‌شود؛ این سرور ایران آدرس عمومی‌اش را می‌دهد تا خارج به آن وصل شود. در پورت‌فورواردها: «پورت محلی» = پورتی که روی ایران باز می‌شود، «مقصد» = مقصدی که از دید سرور خارج در دسترس است."),
+    el("div", { class: "row" },
+      el("div", { class: "field" }, el("label", {}, "آیپی عمومی این سرور (ایران)"), inp("iran_host", t.iran_host, { placeholder: "آی‌پی عمومی ایران" })),
+      el("div", { class: "field" }, el("label", {}, "پورت SSH ایران"), inp("iran_ssh_port", t.iran_ssh_port || 22, { type: "number" })),
+      el("div", { class: "field" }, el("label", {}, "یوزر ایران"), inp("iran_user", t.iran_user || "root"))));
+  modeSel.addEventListener("change", () => revBox.classList.toggle("hidden", modeSel.value !== "reverse"));
+
   const save = async () => {
     errBox.classList.add("hidden");
     const body = {
-      name: f.name.value.trim(), remote_host: f.remote_host.value.trim(),
+      name: f.name.value.trim(), mode: f.mode.value,
+      iran_host: f.iran_host.value.trim(), iran_ssh_port: parseInt(f.iran_ssh_port.value || "22"), iran_user: f.iran_user.value.trim(),
+      remote_host: f.remote_host.value.trim(),
       remote_port: parseInt(f.remote_port.value || "22"), username: f.username.value.trim(),
       auth_method: authSel.value, password: f.password.value, private_key: f.private_key.value,
       cipher: cipherSel.value, workers: parseInt(f.workers.value || "1"), compression: f.compression.checked,
@@ -367,6 +383,8 @@ function openTunnelForm(apiBase, t, onSaved) {
     el("h3", {}, isEdit ? "ویرایش تانل" : "افزودن تانل جدید"),
     errBox,
     el("div", { class: "field" }, el("label", {}, "نام تانل"), inp("name", t.name, { placeholder: "مثلاً تانل 443" })),
+    el("div", { class: "field" }, el("label", {}, "نوع تانل"), modeSel),
+    revBox,
     el("div", { class: "row" },
       el("div", { class: "field" }, el("label", {}, "آیپی سرور خارج"), inp("remote_host", t.remote_host, { placeholder: "1.2.3.4" })),
       el("div", { class: "field" }, el("label", {}, "پورت SSH"), inp("remote_port", t.remote_port || 22, { type: "number" })),
