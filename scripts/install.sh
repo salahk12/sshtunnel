@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# SSH Tunnel Panel — one-command installer (3x-ui style).
+# SSH Tunnel Panel - one-command installer (3x-ui style).
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/USER/REPO/main/scripts/install.sh)
 #
@@ -25,11 +25,11 @@ red()  { echo -e "\033[31m$*\033[0m"; }
 grn()  { echo -e "\033[32m$*\033[0m"; }
 ylw()  { echo -e "\033[33m$*\033[0m"; }
 
-[ "$(id -u)" -eq 0 ] || { red "این اسکریپت باید با root اجرا شود (sudo)."; exit 1; }
+[ "$(id -u)" -eq 0 ] || { red "This script must be run as root (use sudo)."; exit 1; }
 
 # --- uninstall ---
 if [ "${1:-}" = "uninstall" ]; then
-  ylw "در حال حذف..."
+  ylw "Uninstalling..."
   systemctl disable --now sshtunnel-panel 2>/dev/null || true
   for u in /etc/systemd/system/sshtunnel-*.service; do
     [ -e "$u" ] || continue
@@ -39,8 +39,8 @@ if [ "${1:-}" = "uninstall" ]; then
   done
   systemctl daemon-reload
   rm -f "$BIN" "$SERVICE"
-  ylw "باینری و سرویس‌ها حذف شدند. داده‌ها در $DATA_DIR و $CONFIG_DIR باقی ماندند."
-  ylw "برای حذف کامل: rm -rf $DATA_DIR $CONFIG_DIR"
+  ylw "Binary and services removed. Data kept in $DATA_DIR and $CONFIG_DIR."
+  ylw "To remove everything: rm -rf $DATA_DIR $CONFIG_DIR"
   exit 0
 fi
 
@@ -48,12 +48,12 @@ fi
 case "$(uname -m)" in
   x86_64|amd64) ARCH="amd64" ;;
   aarch64|arm64) ARCH="arm64" ;;
-  *) red "معماری پشتیبانی‌نشده: $(uname -m)"; exit 1 ;;
+  *) red "Unsupported architecture: $(uname -m)"; exit 1 ;;
 esac
 
 # --- dependencies ---
 for dep in curl tar systemctl ssh; do
-  command -v "$dep" >/dev/null 2>&1 || { red "نیازمند $dep است. ابتدا نصبش کنید."; exit 1; }
+  command -v "$dep" >/dev/null 2>&1 || { red "Missing dependency: $dep. Please install it first."; exit 1; }
 done
 
 # --- download binary ---
@@ -63,17 +63,17 @@ else
   URL="https://github.com/$REPO/releases/download/$VERSION/sshtunnel-panel-linux-$ARCH.tar.gz"
 fi
 
-ylw "دانلود از: $URL"
+ylw "Downloading: $URL"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 if ! curl -fsSL "$URL" -o "$TMP/panel.tar.gz"; then
-  red "دانلود ناموفق بود. مطمئن شوید REPO درست است و یک Release با باینری منتشر شده."
-  red "می‌توانید با REPO=youruser/yourrepo دوباره اجرا کنید."
+  red "Download failed. Make sure REPO is correct and a Release with binaries is published."
+  red "You can retry with: REPO=youruser/yourrepo bash install.sh"
   exit 1
 fi
 tar -xzf "$TMP/panel.tar.gz" -C "$TMP"
 install -m 0755 "$TMP/sshtunnel-panel" "$BIN"
-grn "باینری نصب شد: $BIN"
+grn "Binary installed: $BIN"
 
 mkdir -p "$CONFIG_DIR" "$DATA_DIR"
 chmod 700 "$CONFIG_DIR" "$DATA_DIR"
@@ -91,7 +91,7 @@ else
   # PORT was explicitly provided on this run.
   LISTEN_FLAG=""
   [ "$PORT_SET" -eq 1 ] && LISTEN_FLAG="--listen 0.0.0.0:$PORT"
-  ylw "نصب قبلی شناسایی شد — تنظیمات و اطلاعات ورود حفظ می‌شوند (آپدیت)."
+  ylw "Existing installation detected - settings and credentials are preserved (upgrade)."
   "$BIN" admin $LISTEN_FLAG $MASTER_FLAG --show || true
 fi
 
@@ -128,21 +128,21 @@ PORT="${LISTEN##*:}"   # actual port from config (may differ from default on upg
 
 echo
 grn "============================================================"
-grn " ✅ SSH Tunnel Panel نصب و اجرا شد"
+grn " SSH Tunnel Panel installed and running"
 grn "============================================================"
-echo " آدرس پنل : http://${IP}:${PORT}${WEBPATH}"
+echo " Panel URL : http://${IP}:${PORT}${WEBPATH}"
 if [ "$FIRST_INSTALL" -eq 1 ]; then
-  echo " (نام کاربری و رمز عبور تصادفی در خروجی بالا چاپ شد — یادداشت کنید)"
+  echo " (A random username and password were printed above - save them.)"
 fi
-[ "$MASTER" = "1" ] && echo " حالت: سرور مرکزی (Master) فعال شد — تب «نودها» را در پنل ببینید."
+[ "$MASTER" = "1" ] && echo " Mode: central master enabled - see the 'Nodes' tab in the panel."
 echo
-echo " توکن این نود (برای ثبت در سرور مرکزی):"
+echo " This node's token (to register it on the central master):"
 echo "   $("$BIN" node-token)"
 echo
-echo " دستورات مفید:"
-echo "   systemctl status sshtunnel-panel      # وضعیت پنل"
-echo "   systemctl restart sshtunnel-panel     # ری‌استارت پنل"
-echo "   $BIN admin --show                     # نمایش آدرس و یوزرنیم"
-echo "   $BIN admin --password 'NEWPASS'       # تغییر رمز از CLI"
-echo "   bash install.sh uninstall             # حذف"
+echo " Useful commands:"
+echo "   systemctl status sshtunnel-panel      # panel status"
+echo "   systemctl restart sshtunnel-panel     # restart the panel"
+echo "   $BIN admin --show                     # show URL and username"
+echo "   $BIN admin --password 'NEWPASS'       # change password from CLI"
+echo "   bash install.sh uninstall             # uninstall"
 grn "============================================================"

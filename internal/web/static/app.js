@@ -47,6 +47,14 @@ let CIPHERS = [];
 let SESSION = {};
 const app = () => $("#app");
 
+// ---------- theme ----------
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("sshtp-theme", t); } catch (_) {}
+}
+function curTheme() { return document.documentElement.dataset.theme || "dark"; }
+applyTheme((() => { try { return localStorage.getItem("sshtp-theme"); } catch (_) { return null; } })() || "dark");
+
 // ---------- boot ----------
 async function boot() {
   try { SESSION = await api("GET", "/session"); } catch (e) { return renderError(e.message); }
@@ -109,7 +117,12 @@ function renderApp(tab, arg) {
     nav.append(navBtn("local", "تانل‌ها"));
   }
   nav.append(navBtn("settings", "تنظیمات"));
-  nav.append(el("button", { onclick: logout }, "خروج"));
+  const themeBtn = el("button", { class: "icon-btn ghost", title: "تغییر تم" });
+  const setIcon = () => themeBtn.textContent = curTheme() === "dark" ? "☀" : "🌙";
+  themeBtn.addEventListener("click", () => { applyTheme(curTheme() === "dark" ? "light" : "dark"); setIcon(); });
+  setIcon();
+  nav.append(themeBtn);
+  nav.append(el("button", { class: "ghost", onclick: logout }, "خروج"));
   app().append(el("header", {}, el("div", { class: "logo" }, "🔒 SSH Tunnel Panel"), nav));
   const m = el("main"); app().append(m);
 
